@@ -15,7 +15,7 @@ Note: the codes are fairly well documented and have help sections at the top. Re
 
 If you have a R9000, setting things up is almost entirely automated. You will need to:
 
-1. copy `plexmediaserver.sh`, `plex_download.s`h and `plex_setup.sh` to `/etc/plexmediaserver`
+1. copy `plexmediaserver.sh`, `plex_download.sh` and `plex_setup.sh` to `/etc/plexmediaserver`
 2. mount the usb harddrive you want to use for plex (e.g., at `/mnt/plex`)
 3. run `/etc/plexmediaserver/plex_setup.sh /mnt/plex` (replace `/mnt/plex` with whatever mountpoint you choose. Also, dont forget to `chmod +x` the script first)
 4. run `service plexmediaserver start`
