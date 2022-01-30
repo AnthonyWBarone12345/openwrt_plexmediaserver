@@ -24,6 +24,8 @@ This will (hopefully) set everything up properly. Note: I build my R9000 images 
 
 If you have another sufficiently powerful ARMv7 device the above instructions might also work for you.
 
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+
 If you have another OpenWRT device, the setup is a bit more involved. You will need to:
 
 1. copy `plexmediaserver.sh` and `plex_setup.sh` to `/etc/plexmediaserver`
