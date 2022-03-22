@@ -90,7 +90,7 @@ load_uci() {
 
 	{ [ -z "${PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR}" ] || ! [ -e "${PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR}" ]; } && [ -e "${PLEX_LIBRARY_DIR}/Application Support" ] && PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR="${PLEX_LIBRARY_DIR}/Application Support"  && /sbin/uci set plexmediaserver.@main[0].plex_application_support_dir="${PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR}"
 
-	{ [ -z "${PLEX_COMPRESSED_ARCHIVE_PATH}" ] || ! [ -e "${PLEX_COMPRESSED_ARCHIVE_PATH}" ]; } && [ -e "${PLEX_LIBRARY_DIR}/Application/plexmediaserver.txz" ] && PLEX_COMPRESSED_ARCHIVE_PATH="${PLEX_LIBRARY_DIR}/Application/plexmediaserver.txz" && /sbin/uci set plexmediaserver.@main[0].plex_compressed_archive_path="${PLEX_COMPRESSED_ARCHIVE_PATH}"
+        { [ -z "${PLEX_COMPRESSED_ARCHIVE_PATH}" ] || ! [ -e "${PLEX_COMPRESSED_ARCHIVE_PATH}" ]; } && { { [ -e "${PLEX_LIBRARY_DIR}/Application/plexmediaserver.sqfs" ] && PLEX_COMPRESSED_ARCHIVE_PATH="${PLEX_LIBRARY_DIR}/Application/plexmediaserver.sqfs"; } || { [ -e "${PLEX_LIBRARY_DIR}/Application/plexmediaserver.txz" ] && PLEX_COMPRESSED_ARCHIVE_PATH="${PLEX_LIBRARY_DIR}/Application/plexmediaserver.txz"; }; } && /sbin/uci set plexmediaserver.@main[0].plex_compressed_archive_path="${PLEX_COMPRESSED_ARCHIVE_PATH}"
 
 	[ -z "${PLEX_TMP_DIR}" ] && PLEX_TMP_DIR="/tmp/plexmediaserver" && /sbin/uci set plexmediaserver.@main[0].plex_tmp_dir="${PLEX_TMP_DIR}"
 	[ $(echo ${PLEX_TMP_DIR} | sed -E s/'^.*\/([^\/]*)$'/'\1'/) != plexmediaserver ] && PLEX_TMP_DIR="${PLEX_TMP_DIR}/plexmediaserver" && /sbin/uci set plexmediaserver.@main[0].plex_tmp_dir="${PLEX_TMP_DIR}"
