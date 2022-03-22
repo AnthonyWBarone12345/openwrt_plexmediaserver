@@ -8,14 +8,22 @@
 #     b) anywhere in /etc, /root, or /usr
 # then this script will find them (albeit with a increasing time penalty as these places are searched)
 
-plex_drive_mountpoint=/mnt/plex
+# manually set mountpoint here. If left empty it will attempt to find it automatically.
+#plex_drive_mountpoint=/mnt/plex
 
 # check mountpoint and flags
 no_download_flag=0
 for inArg in "${@}"; do
 	[ "${inArg}" == '--no-download' ] && no_download_flag=1 && continue
-	[ -d "${inArg}" ] && plex_drive_mountpoint="${inArg}"
+	[ "${inArg}" == '--mountpoint='* ] && plex_drive_mountpoint="$(echo "${inArg}" | sed -E s/'^\-\-mountpoint\='//)"
 done
+if [ -z "${plex_drive_mountpoint}" ]; then
+	plex_drive_mountpoint="$(cat /proc/mounts | grep -Ev '((\/rom)|(\/sys)|(\/overlay)|(\/proc)|(tmpfs)|(devpts)|(mountd)|(ubifs))' | awk '{print $2}')"
+	(( $(echo "${plex_drive_mountpoint}" | wc -l) > 1 )) && plex_drive_mountpoint="$(echo "${plex_drive_mountpoint}" | while read -r pth; do [ -d "${pth}/.plex" ] && echo "${pth}"; done)"
+	(( $(echo "${plex_drive_mountpoint}" | wc -l) > 1 )) && echo "${plex_drive_mountpoint}" | grep -Fq '/mnt' && plex_drive_mountpoint="$(echo "${plex_drive_mountpoint}" | grep -F '/mnt')"
+	(( $(echo "${plex_drive_mountpoint}" | wc -l) > 1 )) && plex_drive_mountpoint="$(echo "${plex_drive_mountpoint}" | head -n 1)"
+fi
+
 ! [ -d "${plex_drive_mountpoint}" ] && echo 'ERROR: mount point directory not found. Aborting.' >&2 && return 1 || echo "Using plex drive mountpoint: ${plex_drive_mountpoint}" >&2
 
 # setup directory tree for plex
@@ -42,24 +50,24 @@ if [ -n ${plex_script_path} ]; then
 	chmod +x "${plex_script_path}" && "${plex_script_path}" setup_uci
 
 # setup very basic service to allow plex to be controlled by running `service plexmediaplayer {start,stop,restart}`
-cat << EOF | tee -a /etc/init.d/plexmediaserver
-#!/bin/sh /etc/rc.common
-
-START=99
-NAME=plexmediaserver
-
-start() {
-	"${plex_script_path}" start
-}
-
-stop() {
-	"${plex_script_path}" stop
-}
-
-restart() {
-	"${plex_script_path}" stop start
-}
-EOF
+#cat << EOF | tee -a /etc/init.d/plexmediaserver
+##!/bin/sh /etc/rc.common
+#
+#START=99
+#NAME=plexmediaserver
+#
+#start() {
+#	"${plex_script_path}" start
+#}
+#
+#stop() {
+#	"${plex_script_path}" stop
+#}
+#
+#restart() {
+#	"${plex_script_path}" stop start
+#}
+#EOF
 
 	/etc/init.d/plexmediaserver enable
 

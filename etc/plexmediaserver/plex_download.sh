@@ -7,6 +7,11 @@
 #
 # The following variables *might* need to be manually altered in some situations
 #
+# 'plex_archive_type' : extension to use for archive. Allowable values are:
+#	'xz' or 'tar.xz' or 'txz' produces a *.tar.xz archive
+# 	'sqfs' produces a squashfs archive
+# 	'both' produces both
+#
 # `plex_tmp` is the tmp/working directory and where the generated archive will be output to. 
 # 	It must be on a filesystem with enough free space to hold the downloaded plex files.
 # 	    It needs to hold a compressed and uncompressed copy of the plex package 
@@ -18,18 +23,26 @@
 # `netgear_url` is where we find the URL to download the netgear r9000 (outdated) plex package. This is done just to grab the "extra_libs" dir it includes.
 # 	This probably wont need to be changed, unless netgear decides to change where the server address where they are hosting the netgear r9000 plex package
 
+# set archive type
+plex_archive_type='sqfs'
+
 # determine URL's and tmp directories to use during the script
 plex_url="$(curl https://plex.tv/api/downloads/5.json | sed -E s/'"id"'/'\n\n\n"id"'/g | grep asustor | sed -E s/'\{"label"'/'\n\n\n{"label"'/g | grep ARMv7 | sed -E s/'^.*"url"\:"(.*\.apk)"\,.*$'/'\1'/)"
 [ -z "${plex_url}" ] && plex_url='https://downloads.plex.tv/plex-media-server-new/1.25.3.5409-f11334058/asustor/PlexMediaServer-1.25.3.5409-f11334058-armv7neon.apk'
 
+# check archive type
+{ [ "${plex_archive_type}" == 'txz' ] || [ "${plex_archive_type}" == 'tar.xz' ]; } && plex_archive_type='xz'
+{ [ "${plex_archive_type}" == 'xz' ] || [ "${plex_archive_type}" == 'sqfs' ]; } || plex_archive_type='both'
+
 
 if [ -n "$(/sbin/uci get plexmediaserver.@main[0].plex_compressed_archive_path)" ]; then
-#	[ -e "$(/sbin/uci get plexmediaserver.@main[0].plex_compressed_archive_path)" ] && mv "$(/sbin/uci get plexmediaserver.@main[0].plex_compressed_archive_path)" `"$(/sbin/uci get plexmediaserver.@main[0].plex_compressed_archive_path).old"
-	plex_tmp="$(dirname "$(/sbin/uci get plexmediaserver.@main[0].plex_compressed_archive_path)")" || plex_tmp=/tmp/plex_tmp
+	plex_tmp="$(dirname "$(/sbin/uci get plexmediaserver.@main[0].plex_compressed_archive_path)")" 
+else
+	plex_tmp=/tmp/plex_tmp
 fi
 
 kk=0
-while [ -d "${plex_tmp}/${kk}" ]; do
+while [ -e "${plex_tmp}/${kk}" ]; do
 	kk=$((( ${kk} + 1 )))
 done
 mkdir -p "${plex_tmp}/${kk}"
@@ -83,8 +96,9 @@ mv "${plex_tmp}/extra_libs" "${plex_tmp}/${kk}/${plex_ver}"
 [ -e "${plex_tmp}/plexmediaserver.txz" ] && mv "${plex_tmp}/plexmediaserver.txz" "${plex_tmp}/plexmediaserver.txz.old"
 
 mkdir -p "${plex_tmp}/${kk}/${plex_ver}/tmp"
+{ [ "${plex_archive_type}" == 'xz' ] || [ "${plex_archive_type}" == 'both' ]; } && tar -cvOf - "${plex_ver}" | xz -6e -zc > "${plex_tmp}/plexmediaserver.txz"
+{ [ "${plex_archive_type}" == 'sqfs' ] || [ "${plex_archive_type}" == 'both' ]; } && ln -s "${plex_ver}/extra_libs" "extra_libs" && mksquashfs "${plex_ver}" "extra_libs" "plexmediaserver.sqfs" -all-root -keep-as-directory -comp zstd -Xcompression-level 22
 
-tar -cvOf - "${plex_ver}" | xz -6e -zc > "${plex_tmp}/plexmediaserver.txz"
 
 cd "${plex_tmp}"
 
