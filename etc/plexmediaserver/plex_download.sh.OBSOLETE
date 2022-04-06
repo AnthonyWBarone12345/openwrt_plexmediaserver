@@ -1,5 +1,7 @@
 #!/bin/sh
 
+# THIS FUNCTIONALITY IS NOW IN /etc/init.d/plexmediaserver
+
 # This script:
 # 1. downloads the netgear r9000 plex package (old plex version), extracts it, steals its "extra_libs dir, then discards the rest
 # 2. downloads the asustor armv7neon plex package (recent plex version), extracts it, steals it main plex binaries + libraries dir, then discards the rest
