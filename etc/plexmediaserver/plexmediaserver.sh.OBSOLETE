@@ -1,5 +1,7 @@
 #!/bin/sh +x
 
+# THIS FUNCTIONALITY IS NOW IN /etc/init.d/plexmediaserver
+
 ##################################################
 # SETUP AND CONTROL (START/STOP) PLEX MEDIA SERVER
 ##################################################
