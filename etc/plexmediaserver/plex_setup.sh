@@ -46,12 +46,38 @@ plex_script_path="$(plex_find_path plexmediaserver.sh)"
 [ -n ${plex_download_path} ] && echo "plex_download.sh found at ${plex_download_path}" >&2 || echo "WARNING: plex_download.sh could not be found. plex archive will not be downloaded." >&2 
 
 # setup UCI
-[ -n ${plex_script_path} ] && chmod +x "${plex_script_path}" && "${plex_script_path}" setup_uci
+if [ -n ${plex_script_path} ]; then
+	chmod +x "${plex_script_path}" && "${plex_script_path}" setup_uci
+
+# setup very basic service to allow plex to be controlled by running `service plexmediaplayer {start,stop,restart}`
+#cat << EOF | tee -a /etc/init.d/plexmediaserver
+##!/bin/sh /etc/rc.common
+#
+#START=99
+#NAME=plexmediaserver
+#
+#start() {
+#	"${plex_script_path}" start
+#}
+#
+#stop() {
+#	"${plex_script_path}" stop
+#}
+#
+#restart() {
+#	"${plex_script_path}" stop start
+#}
+#EOF
+
+	/etc/init.d/plexmediaserver enable
+
+
+fi
 
 # download/generate plex archive
 [ -n ${plex_download_path} ] && chmod +x "${plex_download_path}" && "${plex_download_path}"
 
 # auto-start plex on boot (via /etc/rc.local)
-[ -n ${plex_download_path} ] &&  cp /etc/rc.local /etc/rc.local.backup && echo "$(cat /etc/rc.local | grep -v 'exit 0' | grep -v 'service plexmediaserver start' | grep -v '/etc/init.d/plexmediaserver start'; echo 'sleep 20; /etc/init.d/plexmediaserver start'; echo 'exit 0')" > /etc/rc.local
+[ -n ${plex_script_path} ] && [ -n ${plex_download_path} ] &&  cp /etc/rc.local /etc/rc.local.backup && echo "$(cat /etc/rc.local | grep -v 'exit 0' | grep -v 'service plexmediaserver start' | grep -v '/etc/init.d/plexmediaserver start'; echo 'sleep 20; /etc/init.d/plexmediaserver start'; echo 'exit 0')" > /etc/rc.local
 
-{ [ -n ${plex_download_path} ] || [ "${no_download_flag}" == '1' ]; } &&  echo -e "\n\n-------------------------------------------------------\n\nPlex has been sucessfully installed and setup! \n\nPlex will automatically start up during the boot process. \nTo manually start|stop|restart Plex, you can use the following commands: \n\n\tservice plexmediaserver start \n\tservice plexmediaserver stop \n\tservice plexmediaserver restart\n\nTo access Plex from a web browser, go to: \n\n$(ip addr show br-lan | grep 'inet '| sed -E s/'^.*inet (.*)\/.*$'/'\1'/):32400/web \n\n"
+[ -n ${plex_script_path} ] && { [ -n ${plex_download_path} ] || [ "${no_download_flag}" == '1' ]; } &&  echo -e "\n\n-------------------------------------------------------\n\nPlex has been sucessfully installed and setup! \n\nPlex will automatically start up during the boot process. \nTo manually start|stop|restart Plex, you can use the following commands: \n\n\tservice plexmediaserver start \n\tservice plexmediaserver stop \n\tservice plexmediaserver restart\n\nTo access Plex from a web browser, go to: \n\n$(ip addr show br-lan | grep 'inet '| sed -E s/'^.*inet (.*)\/.*$'/'\1'/):32400/web \n\n"

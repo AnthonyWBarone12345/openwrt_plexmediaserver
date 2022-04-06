@@ -20,7 +20,7 @@
 #                    ---> The default location for this is "/tmp/plexmediaserver"
 # PLEX_VERSION: The plex version in use. This is auto-determined based on the folder name that decompressing the archive with the binaries and libraries gives
 #                    If multiple versions are available, the highest version (found via `sort -Vr | head -n 1`) is used. 
-#                    ---> A specific plex version can be forced using the UCI variable "plexmediaserver.@main[0].force_version"
+#                    ---> A specific plex version can be forced using the UCI variable "plexmediaserver.@main[0].plex_force_version"
 # PLEX_BIN_DIR: The directory actually containing the (version-specific) plex binaries and libraries
 #                   ---> This will be at "${PLEX_TMP_DIR}/${PLEX_VERSION}"
 # TMPDIR: stores temp files for a specific plex instance that is running. 
@@ -34,6 +34,13 @@
 #################################################################################################################
 
 NAME='plexmediaserver'
+START=99
+STOP=99
+EXTRA_COMMANDS="update_check update"
+EXTRA_HELP=<<EOF
+        update_check Checks if an updated Plex Media Server package is available for download
+	update downloads Plex Media Server update (if available) and generates compressed archive of it
+EOF
 
 setup_uci() {
 	echo "setting up UCI config for plexmediaserver" >&2
@@ -50,7 +57,7 @@ setup_uci() {
 	fi
 	
 	# add (empty) config values for any missing UCI options
-	for UCI_opt in plex_script_path plex_library_dir plex_application_support_dir plex_browser_root plex_compressed_archive_path plex_tmp_dir force_version version plex_bin_dir; do
+	for UCI_opt in plex_library_dir plex_application_support_dir plex_browser_root plex_compressed_archive_path plex_tmp_dir plex_force_update_download_url plex_force_version plex_version plex_bin_dir; do
 		echo "${plex_UCI}" | grep -qF "${UCI_opt}" || /sbin/uci add_list plexmediaserver.@main[0].${UCI_opt}=''
 	done
 	
@@ -70,7 +77,7 @@ load_uci() {
 	PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR="$(/sbin/uci get plexmediaserver.@main[0].plex_application_support_dir)"
 	PLEX_COMPRESSED_ARCHIVE_PATH="$(/sbin/uci get plexmediaserver.@main[0].plex_compressed_archive_path)"
 	PLEX_TMP_DIR="$(/sbin/uci get plexmediaserver.@main[0].plex_tmp_dir)"
-	PLEX_VERSION="$(/sbin/uci get plexmediaserver.@main[0].version)"
+	PLEX_VERSION="$(/sbin/uci get plexmediaserver.@main[0].plex_version)"
 	PLEX_BIN_DIR="$(/sbin/uci get plexmediaserver.@main[0].plex_bin_dir)"
 
 	# check UCI variables and set empty/invalid ones to default values
@@ -116,37 +123,54 @@ unpack_plex() {
 	fi
 	
 	# set a few more UCI variables now that we have unpacked plex and know the plex version 
-	ls -1 "${PLEX_TMP_DIR}" | grep -q -E '^[0-9]+\..*$' && PLEX_VERSION="$(ls -1 "${PLEX_TMP_DIR}" | grep -E '^[0-9]+\..*$' | sort -Vr | head -n 1)" && /sbin/uci set plexmediaserver.@main[0].version="${PLEX_VERSION}"
-	[ -n "$(/sbin/uci get plexmediaserver.@main[0].force_version)" ] &&  [ -e "${PLEX_TMP_DIR}/$(/sbin/uci get plexmediaserver.@main[0].force_version)" ] && PLEX_VERSION="$(/sbin/uci get plexmediaserver.@main[0].force_version)" && /sbin/uci set plexmediaserver.@main[0].version="${PLEX_VERSION}"
+	ls -1 "${PLEX_TMP_DIR}" | grep -q -E '^[0-9]+\..*$' && PLEX_VERSION="$(ls -1 "${PLEX_TMP_DIR}" | grep -E '^[0-9]+\..*$' | sort -Vr | head -n 1)" && /sbin/uci set plexmediaserver.@main[0].plex_version="${PLEX_VERSION}"
+	[ -n "$(/sbin/uci get plexmediaserver.@main[0].plex_force_version)" ] &&  [ -e "${PLEX_TMP_DIR}/$(/sbin/uci get plexmediaserver.@main[0].plex_force_version)" ] && PLEX_VERSION="$(/sbin/uci get plexmediaserver.@main[0].plex_force_version)" && /sbin/uci set plexmediaserver.@main[0].plex_version="${PLEX_VERSION}"
 	
 	PLEX_BIN_DIR="${PLEX_TMP_DIR}/${PLEX_VERSION}" && /sbin/uci set plexmediaserver.@main[0].plex_bin_dir="${PLEX_BIN_DIR}"
-	mkdir -p "${PLEX_BIN_DIR}/tmp"
-	
-	# setup links: link Library and "extra_libs" directory into PLEX_BIN_DIR / PLEX_TMP_DIR
-	ln -sf "${PLEX_LIBRARY_DIR}" "${PLEX_BIN_DIR}/Library"
-	! [ -e "${PLEX_TMP_DIR}/extra_libs" ] && [ -e "${PLEX_BIN_DIR}/extra_libs" ] && ln -sf "${PLEX_BIN_DIR}/extra_libs" "${PLEX_TMP_DIR}/extra_libs"
-	
+	if [[ "${PLEX_COMPRESSED_ARCHIVE_PATH}" == *.txz ]]; then
+		mkdir -p "${PLEX_BIN_DIR}/tmp"
+		
+		# setup links: link Library and "extra_libs" directory into PLEX_BIN_DIR / PLEX_TMP_DIR
+		ln -sf "${PLEX_LIBRARY_DIR}" "${PLEX_BIN_DIR}/Library"
+		! [ -e "${PLEX_TMP_DIR}/extra_libs" ] && [ -e "${PLEX_BIN_DIR}/extra_libs" ] && ln -sf "${PLEX_BIN_DIR}/extra_libs" "${PLEX_TMP_DIR}/extra_libs"
+	fi
+
 	/sbin/uci commit plexmediaserver
 	reload_config
 
 }
 
 stop() {
-	echo "Stopping Plex Media Server"
-	for pidFile in "${PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR}/Plex Media Server/plexmediaserver.pid"; do
-		# kill process listed in  plexmediaserver.pid
-		[ -f "${pidFile}" ] && kill -3 "${pidFile}"
-	done
-	echo "Quit sent to server. Waiting 3 seconds and force killing if not dead" >&2
-	sleep 3
 
-	if [ "$(ps | egrep -e 'Plex Media Server|Plex DLNA Server' | grep -v grep | wc -l)" != "0" ]; then
-		# kill any remnants still running
+	# setup / load config from UCI
+	setup_uci
+	load_uci
+	
+	echo "Stopping Plex Media Server"
+	plex_pid="$(cat "${PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR}/Plex Media Server/plexmediaserver.pid")"
+	
+	# kill process listed in  plexmediaserver.pid
+	if $(echo "${plex_pid}" | grep -q -E '^[0-9]+$'); then
+		kill -3 "${plex_pid}"
+		
+		echo "SIGQUIT sent to server. Waiting 3 seconds and terminating if not dead" >&2
+		sleep 3
+
+		ps | grep -q "${plex_pid}" && kill -15 "${plex_pid}" && echo "SIGTERM sent to server. Waiting 3 seconds and force killing if not dead" >&2 && sleep 3
+
+		echo "" > "${PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR}/Plex Media Server/plexmediaserver.pid"
+	else
+		echo " plexmediaserver.pid file missing or invalid. Skipping straight to force killing all Plex Media Server processes" >&2
+	fi
+
+	if [ "$(ps | grep -E '((Plex Media Server)|(Plex DLNA Server)|(PMS RunServer)|(Plex Plug-in)|(Plex Script Hos)|(plexmediaserver))' | grep -v grep | wc -l)" != "0" ]; then
+	# kill any remnants still running
 		echo "Force killing leftover plexmediaserver procs" >&2
-		ps | egrep -e "Plex Media Server|Plex DLNA Server" | awk '{print $1}' | xargs kill -9
+		ps | grep -E '((Plex Media Server)|(Plex DLNA Server)|(PMS RunServer)|(Plex Plug-in)|(Plex Script Hos)|(plexmediaserver))' | grep -v grep | awk '{print $1}' | xargs kill -9
 	else
 		echo "Plex Media Server shutdown cleanly" >&2
 	fi
+	cat /proc/mounts | grep plexmediaserver | grep -q squashfs && umount "${PLEX_BIN_DIR}/tmp" "${PLEX_TMP_DIR}"
 }
 
 start() {
@@ -185,3 +209,138 @@ start() {
 	cd "${PLEX_BIN_DIR}"
 	"${PLEX_BIN_DIR}/Plex Media Server" & 
 }
+
+
+update_check() {
+
+	setup_uci
+	load_uci
+
+	# determine URL's and tmp directories to use during the script
+	
+	plex_url="$(/sbin/uci get plexmediaserver.@main[0].plex_force_update_download_url)"
+	
+	[ -z "${plex_url}" ] && plex_url="$(curl https://plex.tv/api/downloads/5.json | sed -E s/'"id"'/'\n\n\n"id"'/g | grep asustor | sed -E s/'\{"label"'/'\n\n\n{"label"'/g | grep ARMv7 | sed -E s/'^.*"url"\:"(.*\.apk)"\,.*$'/'\1'/)"
+	
+	if $(echo "${plex_url}" | grep -q -F "${PLEX_VERSION}"); then
+		echo "Plex Media Server is up to date" 1>&2
+		plex_update_available=0
+	elif $(echo "${plex_url}" | grep -q -E '^.+\/PlexMediaServer\-.+\.apk'); then
+		echo -e "An Update for Plex Media Server is available!!\n\nCurrent version:  ${PLEX_VERSION}\nNew Version:      $(echo "$plex_url" | sed -E s/'^.*\/PlexMediaServer-(.*)\.apk$'/'\1'/)\n" 1>&2
+		plex_update_available=1
+	else
+		echo "Download url for downloading an update to plex was not resolved. The download url can be manually specified via the plexmediasserver UCI variable 'plex_force_update_download_url'"
+		plex_update_available=0
+	fi
+}
+
+update() {
+
+# This script:
+# 1. downloads the netgear r9000 plex package (old plex version), extracts it, steals its "extra_libs dir, then discards the rest
+# 2. downloads the asustor armv7neon plex package (recent plex version), extracts it, steals it main plex binaries + libraries dir, then discards the rest
+# 3. combines the parts kept in (1) and (2) and generates a compressed .txz archive from it
+#
+# The following variables *might* need to be manually altered in some situations
+#
+# 'plex_archive_type' : extension to use for archive. Allowable values are:
+#	'xz' or 'tar.xz' or 'txz' produces a *.tar.xz archive
+# 	'sqfs' produces a squashfs archive
+# 	'both' produces both
+#
+# `plex_tmp` is the tmp/working directory and where the generated archive will be output to. 
+# 	It must be on a filesystem with enough free space to hold the downloaded plex files.
+# 	    It needs to hold a compressed and uncompressed copy of the plex package 
+# 	     --> a few hundred MB max data usage (so it might or might not fit in RAM)
+# 	If set in UCI, "plex_compressed_archive_path" is used (since this is where the generated archive needs to go). Otherwise, /tmp/plex_tmp is used.
+#
+# `plex_url` is the download link for the up-to-date plex version to use. By default it tries to fetch the latest asustor armv7neon plex packagee released.
+#
+# `netgear_url` is where we find the URL to download the netgear r9000 (outdated) plex package. This is done just to grab the "extra_libs" dir it includes.
+# 	This probably wont need to be changed, unless netgear decides to change where the server address where they are hosting the netgear r9000 plex package
+
+	update_check
+	[ ${plex_update_available} == 0 ] && return
+
+	# set archive type
+	plex_archive_type="$(/sbin/uci get plexmediaserver.@main[0].plex_compressed_archive_path | sed -E s/'^.*\.((sqfs)|(tgx)|(tar.gz))'/'\1'/)"
+	[ -z ${plex_archive_type} ] && plex_archive_type='sqfs'
+	
+	# check archive type
+	{ [ "${plex_archive_type}" == 'txz' ] || [ "${plex_archive_type}" == 'tar.xz' ]; } && plex_archive_type='txz'
+	{ [ "${plex_archive_type}" == 'txz' ] || [ "${plex_archive_type}" == 'sqfs' ]; } || plex_archive_type='both'
+			
+		
+	if [ -n "$(/sbin/uci get plexmediaserver.@main[0].plex_compressed_archive_path)" ]; then
+		plex_tmp="$(dirname "$(/sbin/uci get plexmediaserver.@main[0].plex_compressed_archive_path)")" 
+	else
+		plex_tmp=/tmp/plex_tmp
+	fi
+	
+	kk=0
+	while [ -e "${plex_tmp}/${kk}" ]; do
+		kk=$((( ${kk} + 1 )))
+	done
+	mkdir -p "${plex_tmp}/${kk}"
+	
+	netgear_url='http://updates1.netgear.com/sw-apps/plex/r9000/'
+	
+	# get url for most recent netgear plex download from netgear "verify_binary" url and download plex from it
+	cd "${plex_tmp}/${kk}"
+	
+	wget -r "${netgear_url}"
+	
+	find "${plex_tmp}/${kk}" -type f -name 'verify_binary*.txt' | while read -r vb; do
+		wget "$(cat "${vb}" | grep -F 'url="' | sed -E s/'^.* url\="(.*)".*$'/'\1'/)"
+	done
+	
+	# extract netgear plex package, strip away the extra_libs dir, discard everything else
+	
+	gzip -dc "${plex_tmp}/${kk}"/*.tgz | tar -x
+	
+	mv "${plex_tmp}/${kk}"/*/extra_libs "${plex_tmp}"
+	
+	cd "${plex_tmp}"
+	
+	rm -rf "${plex_tmp}/${kk}"
+	
+	mkdir -p "${plex_tmp}/${kk}"
+	cd "${plex_tmp}/${kk}"
+	
+	# download (up-to-date) plex version
+	
+	wget "${plex_url}"
+	
+	# extract it, strip away the main binaries/libs dir, discard everything else
+	
+	plex_filename="${plex_tmp}/${kk}/$(echo "${plex_url}" | sed -E s/'^.*\/'// | sed -E s/'\.apk$'//)"
+	
+	mv "${plex_filename}.apk" "${plex_filename}.zip"
+	unzip "${plex_filename}.zip"
+	
+	plex_ver="$(echo "${plex_filename}" | sed -E s/'^.*PlexMediaServer\-'//)"
+	mkdir "${plex_tmp}/${kk}/${plex_ver}"
+	mv data.tar.gz  "${plex_tmp}/${kk}/${plex_ver}"
+	cd "${plex_tmp}/${kk}/${plex_ver}"
+	
+	gzip -dc "${plex_tmp}/${kk}/${plex_ver}/data.tar.gz" | tar -x
+	mv "${plex_tmp}/${kk}/${plex_ver}/data.tar.gz" "${plex_tmp}/${kk}"
+	cd "${plex_tmp}/${kk}"
+	
+	mv "${plex_tmp}/extra_libs" "${plex_tmp}/${kk}/${plex_ver}"
+	
+	[ -e "${plex_tmp}/plexmediaserver.${plex_archive_type}" ] && mv -f "${plex_tmp}/plexmediaserver.${plex_archive_type}" "${plex_tmp}/plexmediaserver.${plex_archive_type}.old"
+	
+	mkdir -p "${plex_tmp}/${kk}/${plex_ver}/tmp"
+	{ [ "${plex_archive_type}" == 'txz' ] || [ "${plex_archive_type}" == 'both' ]; } && tar -cvOf - "${plex_ver}" | xz -6e -zc > "${plex_tmp}/plexmediaserver.txz"
+	{ [ "${plex_archive_type}" == 'sqfs' ] || [ "${plex_archive_type}" == 'both' ]; } && ln -s "${plex_ver}/extra_libs" "extra_libs" && mksquashfs "${plex_ver}" "extra_libs" "plexmediaserver.sqfs" -all-root -keep-as-directory -comp zstd -Xcompression-level 22
+		
+	mv "${plex_tmp}/${kk}/plexmediaserver.sqfs" "${plex_tmp}"
+		
+	cd "${plex_tmp}"
+	
+	#rm -rf "${plex_tmp}/${kk}"
+	
+	[ -e "${plex_tmp}/plexmediaserver.${plex_archive_type}" ] && echo "Plex Media Server package archive generated!. Archive is located at: ${plex_tmp}/plexmediaserver.${plex_archive_type}" >&2
+}
+
