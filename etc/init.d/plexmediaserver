@@ -343,13 +343,22 @@ update() {
 	mkdir -p "${plex_tmp}/${kk}/${plex_ver}/tmp"
 	{ [ "${plex_archive_type}" == 'txz' ] || [ "${plex_archive_type}" == 'both' ]; } && tar -cvOf - "${plex_ver}" | xz -6e -zc > "${plex_tmp}/plexmediaserver.txz"
 	{ [ "${plex_archive_type}" == 'sqfs' ] || [ "${plex_archive_type}" == 'both' ]; } && ln -s "${plex_ver}/extra_libs" "extra_libs" && mksquashfs "${plex_ver}" "extra_libs" "plexmediaserver.sqfs" -all-root -keep-as-directory -comp zstd -Xcompression-level 22
-		
+	
+	mkdir -p "${plex_tmp}/old"
+	mv "${plex_tmp}/plexmediaserver."* "${plex_tmp}/old"
+	
 	mv "${plex_tmp}/${kk}/plexmediaserver.sqfs" "${plex_tmp}"
 		
 	cd "${plex_tmp}"
 	
-	#rm -rf "${plex_tmp}/${kk}"
+	rm -rf "${plex_tmp}/${kk}"
 	
 	[ -e "${plex_tmp}/plexmediaserver.${plex_archive_type}" ] && echo "Plex Media Server package archive generated!. Archive is located at: ${plex_tmp}/plexmediaserver.${plex_archive_type}" >&2
+
+	stop
+	{ [ "${plex_archive_type}" == 'sqfs' ] || [ "${plex_archive_type}" == 'both' ]; } && rm "${PLEX_TMP_DIR}/plexmediaserver.sqfs"
+	{ [ "${plex_archive_type}" == 'txz' ] || [ "${plex_archive_type}" == 'both' ]; } &&  rm "${PLEX_TMP_DIR}/${PLEX_VERSION}"
+	start
+	
 }
 
