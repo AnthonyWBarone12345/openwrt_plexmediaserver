@@ -61,6 +61,9 @@ setup_uci() {
 		echo "${plex_UCI}" | grep -qF "${UCI_opt}" || /sbin/uci add_list plexmediaserver.@main[0].${UCI_opt}=''
 	done
 	
+	# load values from UCI
+	load_uci
+	
 	# commit changes
 	/sbin/uci commit plexmediaserver;
 	reload_config
@@ -92,7 +95,9 @@ load_uci() {
 		else
 			PLEX_LIBRARY_DIR="$(find "${PLEX_BROWSER_ROOT}" -type d -maxdepth 3 -path '*/.plex/Library' | head -n 1)"
 		fi
-		[ -n "${PLEX_LIBRARY_DIR}" ] && [ -e "${PLEX_LIBRARY_DIR}" ] && /sbin/uci set plexmediaserver.@main[0].plex_library_dir="${PLEX_LIBRARY_DIR}"
+		[ -n "${PLEX_LIBRARY_DIR}" ] && /sbin/uci set plexmediaserver.@main[0].plex_library_dir="${PLEX_LIBRARY_DIR}" 
+		mkdir -p "${PLEX_LIBRARY_DIR}/Application" 
+		mkdir -p "${PLEX_LIBRARY_DIR}/Application Support" 
 	fi
 
 	{ [ -z "${PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR}" ] || ! [ -e "${PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR}" ]; } && [ -e "${PLEX_LIBRARY_DIR}/Application Support" ] && PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR="${PLEX_LIBRARY_DIR}/Application Support"  && /sbin/uci set plexmediaserver.@main[0].plex_application_support_dir="${PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR}"
@@ -110,6 +115,10 @@ load_uci() {
 }
 
 unpack_plex() {
+	
+	# setup / load config from UCI
+	setup_uci
+	
 	# decompress Plex Binaries and Libs from plexmediaserver.txz
 	{ [ -z "${PLEX_BIN_DIR}" ] || [ -z "${PLEX_VERSION}" ] || [ \! -f "${PLEX_BIN_DIR}/Plex Media Server" ]; } && echo "Preparing plexmediaserver for use - extracting plex binaries and library files" >&2 || return 0
 	if [[ "${PLEX_COMPRESSED_ARCHIVE_PATH}" == *.txz ]] || [[ "${PLEX_COMPRESSED_ARCHIVE_PATH}" == *.tar.xz ]]; then
@@ -144,7 +153,6 @@ stop() {
 
 	# setup / load config from UCI
 	setup_uci
-	load_uci
 	
 	echo "Stopping Plex Media Server"
 	plex_pid="$(cat "${PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR}/Plex Media Server/plexmediaserver.pid")"
@@ -160,13 +168,13 @@ stop() {
 
 		echo "" > "${PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR}/Plex Media Server/plexmediaserver.pid"
 	else
-		echo " plexmediaserver.pid file missing or invalid. Skipping straight to force killing all Plex Media Server processes" >&2
+		echo "plexmediaserver.pid file missing or invalid. Skipping straight to force killing all Plex Media Server processes" >&2
 	fi
 
-	if [ "$(ps | grep -E '((Plex Media Server)|(Plex DLNA Server)|(PMS RunServer)|(Plex Plug-in)|(Plex Script Hos)|(plexmediaserver))' | grep -v grep | wc -l)" != "0" ]; then
+	if [ "$(ps | grep -E '((Plex Media Server)|(Plex DLNA Server)|(PMS RunServer)|(Plex Plug-in)|(Plex Script Hos)|(\/tmp\/plexmediaserver))' | grep -v grep | wc -l)" != "0" ]; then
 	# kill any remnants still running
 		echo "Force killing leftover plexmediaserver procs" >&2
-		ps | grep -E '((Plex Media Server)|(Plex DLNA Server)|(PMS RunServer)|(Plex Plug-in)|(Plex Script Hos)|(plexmediaserver))' | grep -v grep | awk '{print $1}' | xargs kill -9
+		ps | grep -E '((Plex Media Server)|(Plex DLNA Server)|(PMS RunServer)|(Plex Plug-in)|(Plex Script Hos)|(\/tmp\/plexmediaserver))' | grep -v grep | awk '{print $1}' | xargs kill -9
 	else
 		echo "Plex Media Server shutdown cleanly" >&2
 	fi
@@ -176,9 +184,6 @@ stop() {
 start() {
 
 	# setup / load config from UCI
-	setup_uci
-	load_uci
-
 	# run unpack operation if plex binary not found
 	unpack_plex
 
@@ -210,11 +215,17 @@ start() {
 	"${PLEX_BIN_DIR}/Plex Media Server" & 
 }
 
+restart() {
+
+	stop
+	sleep 1
+	start
+}
+
 
 update_check() {
 
 	setup_uci
-	load_uci
 
 	# determine URL's and tmp directories to use during the script
 	
@@ -262,11 +273,9 @@ update() {
 	update_check
 	[ ${plex_update_available} == 0 ] && return
 
-	# set archive type
+	# set/check archive type
 	plex_archive_type="$(/sbin/uci get plexmediaserver.@main[0].plex_compressed_archive_path | sed -E s/'^.*\.((sqfs)|(tgx)|(tar.gz))'/'\1'/)"
-	[ -z ${plex_archive_type} ] && plex_archive_type='sqfs'
-	
-	# check archive type
+	{ [ -z ${plex_archive_type} ] || [ ${plex_archive_type} == 'squashfs' ]; } && plex_archive_type='sqfs'
 	{ [ "${plex_archive_type}" == 'txz' ] || [ "${plex_archive_type}" == 'tar.xz' ]; } && plex_archive_type='txz'
 	{ [ "${plex_archive_type}" == 'txz' ] || [ "${plex_archive_type}" == 'sqfs' ]; } || plex_archive_type='both'
 			
