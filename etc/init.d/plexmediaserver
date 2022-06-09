@@ -36,16 +36,17 @@
 NAME='plexmediaserver'
 START=99
 STOP=99
-EXTRA_COMMANDS="update_check update"
+EXTRA_COMMANDS="update_check update unpack_plex"
 EXTRA_HELP=<<EOF
-        update_check Checks if an updated Plex Media Server package is available for download
-	update downloads Plex Media Server update (if available) and generates compressed archive of it
+        update_check      Checks if an updated Plex Media Server package is available for download
+	update downloads  Plex Media Server update (if available) and generates archive file for it
+	unpack_plex       Unpacks Plex Media Server application files, but does not run Plex binary
 EOF
 
 setup_uci() {
 	echo "setting up UCI config for plexmediaserver" >&2
 
-	[ -e /etc/config/plexmediaserver ] || touch /etc/config/plexmediaserver 
+	[ -f /etc/config/plexmediaserver ] || touch /etc/config/plexmediaserver 
 	plex_UCI="$(/sbin/uci show plexmediaserver)"
 	
 	# if plexmediaserver.@main[0] doesnt exist, scrap config and start from scratch
@@ -61,9 +62,9 @@ setup_uci() {
 		echo "${plex_UCI}" | grep -qF "${UCI_opt}" || /sbin/uci add_list plexmediaserver.@main[0].${UCI_opt}=''
 	done
 	
-	# load values from UCI
+	# Finish loading UCI
 	load_uci
-	
+
 	# commit changes
 	/sbin/uci commit plexmediaserver;
 	reload_config
@@ -85,12 +86,14 @@ load_uci() {
 
 	# check UCI variables and set empty/invalid ones to default values
 
-	{ [ -z "${PLEX_BROWSER_ROOT}" ] || ! [ -e "${PLEX_BROWSER_ROOT}" ]; } && PLEX_BROWSER_ROOT="$(cat /proc/mounts | grep -E '^\/dev\/' | grep -Ev 'squashfs|ubifs' | sed -E s/'^\/dev\/[^ \t]*[ \t]+([^ \t]*)[ \t]+.*$'/'\1'/ | while read -r nn; do find "$nn" -maxdepth 2 -type d -name '.plex'; done | while read -r nn; do [ -e "${nn}/Library" ] && echo "$nn" | sed -E s/'\/[^\/]*$'// && break; done)"
-	{ [ -z "${PLEX_BROWSER_ROOT}" ] || ! [ -e "${PLEX_BROWSER_ROOT}" ]; } && [ -n "$(ls -1 /mnt)" ] && PLEX_BROWSER_ROOT="$(ls -1 /mnt | head -n 1)" 
+	{ [ -z "${PLEX_BROWSER_ROOT}" ] || ! [ -d "${PLEX_BROWSER_ROOT}" ]; } && PLEX_BROWSER_ROOT="$(cat /proc/mounts | grep -E '^\/dev\/' | grep -Ev 'squashfs|ubifs' | sed -E s/'^\/dev\/[^ \t]*[ \t]+([^ \t]*)[ \t]+.*$'/'\1'/ | while read -r nn; do find "$nn" -maxdepth 2 -type d -name '.plex'; done | while read -r nn; do [ -d "${nn}/Library" ] && echo "$nn" | sed -E s/'\/[^\/]*$'// && break; done)"
+	{ [ -z "${PLEX_BROWSER_ROOT}" ] || ! [ -d "${PLEX_BROWSER_ROOT}" ]; } && [ -n "$(ls -1 /mnt)" ] && PLEX_BROWSER_ROOT="$(ls -1 /mnt | head -n 1)" 
 	[ -n "${PLEX_BROWSER_ROOT}" ] && /sbin/uci set plexmediaserver.@main[0].plex_browser_root="${PLEX_BROWSER_ROOT}"
 
-	if { [ -z "${PLEX_LIBRARY_DIR}" ] || ! [ -e "${PLEX_LIBRARY_DIR}" ]; }; then
-		if [ -e "${PLEX_BROWSER_ROOT}/.plex/Library" ]; then
+	cat /proc/mounts | grep -q "${PLEX_BROWSER_ROOT}" || { mount "${PLEX_BROWSER_ROOT}" && sleep 5; }
+
+	if { [ -z "${PLEX_LIBRARY_DIR}" ] || ! [ -d "${PLEX_LIBRARY_DIR}" ]; }; then
+		if [ -d "${PLEX_BROWSER_ROOT}/.plex/Library" ]; then
 			PLEX_LIBRARY_DIR="${PLEX_BROWSER_ROOT}/.plex/Library"
 		else
 			PLEX_LIBRARY_DIR="$(find "${PLEX_BROWSER_ROOT}" -type d -maxdepth 3 -path '*/.plex/Library' | head -n 1)"
@@ -100,9 +103,9 @@ load_uci() {
 		mkdir -p "${PLEX_LIBRARY_DIR}/Application Support" 
 	fi
 
-	{ [ -z "${PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR}" ] || ! [ -e "${PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR}" ]; } && [ -e "${PLEX_LIBRARY_DIR}/Application Support" ] && PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR="${PLEX_LIBRARY_DIR}/Application Support"  && /sbin/uci set plexmediaserver.@main[0].plex_application_support_dir="${PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR}"
+	{ [ -z "${PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR}" ] || ! [ -d "${PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR}" ]; } && [ -d "${PLEX_LIBRARY_DIR}/Application Support" ] && PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR="${PLEX_LIBRARY_DIR}/Application Support"  && /sbin/uci set plexmediaserver.@main[0].plex_application_support_dir="${PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR}"
 
-        { [ -z "${PLEX_COMPRESSED_ARCHIVE_PATH}" ] || ! [ -e "${PLEX_COMPRESSED_ARCHIVE_PATH}" ]; } && { { [ -e "${PLEX_LIBRARY_DIR}/Application/plexmediaserver.sqfs" ] && PLEX_COMPRESSED_ARCHIVE_PATH="${PLEX_LIBRARY_DIR}/Application/plexmediaserver.sqfs"; } || { [ -e "${PLEX_LIBRARY_DIR}/Application/plexmediaserver.txz" ] && PLEX_COMPRESSED_ARCHIVE_PATH="${PLEX_LIBRARY_DIR}/Application/plexmediaserver.txz"; }; } && /sbin/uci set plexmediaserver.@main[0].plex_compressed_archive_path="${PLEX_COMPRESSED_ARCHIVE_PATH}"
+        { [ -z "${PLEX_COMPRESSED_ARCHIVE_PATH}" ] || ! [ -f "${PLEX_COMPRESSED_ARCHIVE_PATH}" ]; } && { { [ -f "${PLEX_LIBRARY_DIR}/Application/plexmediaserver.sqfs" ] && PLEX_COMPRESSED_ARCHIVE_PATH="${PLEX_LIBRARY_DIR}/Application/plexmediaserver.sqfs"; } || { [ -f "${PLEX_LIBRARY_DIR}/Application/plexmediaserver.txz" ] && PLEX_COMPRESSED_ARCHIVE_PATH="${PLEX_LIBRARY_DIR}/Application/plexmediaserver.txz"; }; } && /sbin/uci set plexmediaserver.@main[0].plex_compressed_archive_path="${PLEX_COMPRESSED_ARCHIVE_PATH}"
 
 	[ -z "${PLEX_TMP_DIR}" ] && PLEX_TMP_DIR="/tmp/plexmediaserver" && /sbin/uci set plexmediaserver.@main[0].plex_tmp_dir="${PLEX_TMP_DIR}"
 	[ $(echo ${PLEX_TMP_DIR} | sed -E s/'^.*\/([^\/]*)$'/'\1'/) != plexmediaserver ] && PLEX_TMP_DIR="${PLEX_TMP_DIR}/plexmediaserver" && /sbin/uci set plexmediaserver.@main[0].plex_tmp_dir="${PLEX_TMP_DIR}"
@@ -133,7 +136,7 @@ unpack_plex() {
 	
 	# set a few more UCI variables now that we have unpacked plex and know the plex version 
 	ls -1 "${PLEX_TMP_DIR}" | grep -q -E '^[0-9]+\..*$' && PLEX_VERSION="$(ls -1 "${PLEX_TMP_DIR}" | grep -E '^[0-9]+\..*$' | sort -Vr | head -n 1)" && /sbin/uci set plexmediaserver.@main[0].plex_version="${PLEX_VERSION}"
-	[ -n "$(/sbin/uci get plexmediaserver.@main[0].plex_force_version)" ] &&  [ -e "${PLEX_TMP_DIR}/$(/sbin/uci get plexmediaserver.@main[0].plex_force_version)" ] && PLEX_VERSION="$(/sbin/uci get plexmediaserver.@main[0].plex_force_version)" && /sbin/uci set plexmediaserver.@main[0].plex_version="${PLEX_VERSION}"
+	[ -n "$(/sbin/uci get plexmediaserver.@main[0].plex_force_version)" ] && [ -d "${PLEX_TMP_DIR}/$(/sbin/uci get plexmediaserver.@main[0].plex_force_version)" ] && PLEX_VERSION="$(/sbin/uci get plexmediaserver.@main[0].plex_force_version)" && /sbin/uci set plexmediaserver.@main[0].plex_version="${PLEX_VERSION}"
 	
 	PLEX_BIN_DIR="${PLEX_TMP_DIR}/${PLEX_VERSION}" && /sbin/uci set plexmediaserver.@main[0].plex_bin_dir="${PLEX_BIN_DIR}"
 	if [[ "${PLEX_COMPRESSED_ARCHIVE_PATH}" == *.txz ]]; then
@@ -141,7 +144,7 @@ unpack_plex() {
 		
 		# setup links: link Library and "extra_libs" directory into PLEX_BIN_DIR / PLEX_TMP_DIR
 		ln -sf "${PLEX_LIBRARY_DIR}" "${PLEX_BIN_DIR}/Library"
-		! [ -e "${PLEX_TMP_DIR}/extra_libs" ] && [ -e "${PLEX_BIN_DIR}/extra_libs" ] && ln -sf "${PLEX_BIN_DIR}/extra_libs" "${PLEX_TMP_DIR}/extra_libs"
+		! [ -d "${PLEX_TMP_DIR}/extra_libs" ] && [ -d "${PLEX_BIN_DIR}/extra_libs" ] && ln -sf "${PLEX_BIN_DIR}/extra_libs" "${PLEX_TMP_DIR}/extra_libs"
 	fi
 
 	/sbin/uci commit plexmediaserver
@@ -265,29 +268,31 @@ update() {
 # 	     --> a few hundred MB max data usage (so it might or might not fit in RAM)
 # 	If set in UCI, "plex_compressed_archive_path" is used (since this is where the generated archive needs to go). Otherwise, /tmp/plex_tmp is used.
 #
-# `plex_url` is the download link for the up-to-date plex version to use. By default it tries to fetch the latest asustor armv7neon plex packagee released.
+# `plex_url` is the download link for the up-to-date plex version to use. By default it tries to fetch the latest asustor armv7neon plex packagee released. This can be forced using the UCI variable plex_force_update_download_url 
 #
 # `netgear_url` is where we find the URL to download the netgear r9000 (outdated) plex package. This is done just to grab the "extra_libs" dir it includes.
 # 	This probably wont need to be changed, unless netgear decides to change where the server address where they are hosting the netgear r9000 plex package
+#
+# NOTE: To force the update to run, [re]move the archive at "${PLEX_COMPRESSED_ARCHIVE_PATH}". If there is not a file at "${PLEX_COMPRESSED_ARCHIVE_PATH}" then the update will run, even if `update_check` says there isnt an update available.
 
 	update_check
-	[ ${plex_update_available} == 0 ] && return
+	[ ${plex_update_available} == 0 ] && [ -f "${PLEX_COMPRESSED_ARCHIVE_PATH}" ] && echo -e "Update will not run, since Plex Media Server is up to date. To force running the update, [re]move the file at ${PLEX_COMPRESSED_ARCHIVE_PATH}" >&2 && return
 
 	# set/check archive type
-	plex_archive_type="$(/sbin/uci get plexmediaserver.@main[0].plex_compressed_archive_path | sed -E s/'^.*\.((sqfs)|(tgx)|(tar.gz))'/'\1'/)"
+	plex_archive_type="$(echo "${PLEX_COMPRESSED_ARCHIVE_PATH}" | sed -E s/'^.*\.((sq(uash)?fs)|(txz)|(tar\.xz))'/'\1'/)"
 	{ [ -z ${plex_archive_type} ] || [ ${plex_archive_type} == 'squashfs' ]; } && plex_archive_type='sqfs'
 	{ [ "${plex_archive_type}" == 'txz' ] || [ "${plex_archive_type}" == 'tar.xz' ]; } && plex_archive_type='txz'
 	{ [ "${plex_archive_type}" == 'txz' ] || [ "${plex_archive_type}" == 'sqfs' ]; } || plex_archive_type='both'
 			
 		
-	if [ -n "$(/sbin/uci get plexmediaserver.@main[0].plex_compressed_archive_path)" ]; then
-		plex_tmp="$(dirname "$(/sbin/uci get plexmediaserver.@main[0].plex_compressed_archive_path)")" 
+	if [ -n "${PLEX_COMPRESSED_ARCHIVE_PATH}" ]; then
+		plex_tmp="$(dirname "${PLEX_COMPRESSED_ARCHIVE_PATH}")" 
 	else
 		plex_tmp=/tmp/plex_tmp
 	fi
-	
+
 	kk=0
-	while [ -e "${plex_tmp}/${kk}" ]; do
+	while [ -d "${plex_tmp}/${kk}" ]; do
 		kk=$((( ${kk} + 1 )))
 	done
 	mkdir -p "${plex_tmp}/${kk}"
@@ -338,14 +343,18 @@ update() {
 	
 	mv "${plex_tmp}/extra_libs" "${plex_tmp}/${kk}/${plex_ver}"
 	
-	[ -e "${plex_tmp}/plexmediaserver.${plex_archive_type}" ] && mv -f "${plex_tmp}/plexmediaserver.${plex_archive_type}" "${plex_tmp}/plexmediaserver.${plex_archive_type}.old"
+	[ -f "${plex_tmp}/plexmediaserver.${plex_archive_type}" ] && mv -f "${plex_tmp}/plexmediaserver.${plex_archive_type}" "${plex_tmp}/plexmediaserver.${plex_archive_type}.old"
 	
 	mkdir -p "${plex_tmp}/${kk}/${plex_ver}/tmp"
+
+
+
 	{ [ "${plex_archive_type}" == 'txz' ] || [ "${plex_archive_type}" == 'both' ]; } && tar -cvOf - "${plex_ver}" | xz -6e -zc > "${plex_tmp}/plexmediaserver.txz"
-	{ [ "${plex_archive_type}" == 'sqfs' ] || [ "${plex_archive_type}" == 'both' ]; } && ln -s "${plex_ver}/extra_libs" "extra_libs" && mksquashfs "${plex_ver}" "extra_libs" "plexmediaserver.sqfs" -all-root -keep-as-directory -comp zstd -Xcompression-level 22
+	{ [ "${plex_archive_type}" == 'sqfs' ] || [ "${plex_archive_type}" == 'both' ]; } && ln -sf "${plex_ver}/extra_libs" "extra_libs" && mksquashfs "${plex_ver}" "extra_libs" "plexmediaserver.sqfs" -all-root -keep-as-directory -comp zstd -Xcompression-level 22
+#	{ [ "${plex_archive_type}" == 'sqfs' ] || [ "${plex_archive_type}" == 'both' ]; } && ln -sf "${plex_ver}/extra_libs" "extra_libs" && ln -sf "${PLEX_LIBRARY_DIR}" "${plex_ver}/Library" && mksquashfs "${plex_ver}" "extra_libs" "plexmediaserver.sqfs" -all-root -keep-as-directory -comp zstd -Xcompression-level 22
 	
 	mkdir -p "${plex_tmp}/old"
-	mv "${plex_tmp}/plexmediaserver."* "${plex_tmp}/old"
+	mv -f "${plex_tmp}/plexmediaserver."* "${plex_tmp}/old"
 	
 	mv "${plex_tmp}/${kk}/plexmediaserver.sqfs" "${plex_tmp}"
 		
@@ -353,11 +362,11 @@ update() {
 	
 	rm -rf "${plex_tmp}/${kk}"
 	
-	[ -e "${plex_tmp}/plexmediaserver.${plex_archive_type}" ] && echo "Plex Media Server package archive generated!. Archive is located at: ${plex_tmp}/plexmediaserver.${plex_archive_type}" >&2
+	[ -f "${plex_tmp}/plexmediaserver.${plex_archive_type}" ] && echo "Plex Media Server package archive generated!. Archive is located at: ${plex_tmp}/plexmediaserver.${plex_archive_type}" >&2
 
 	stop
 	{ [ "${plex_archive_type}" == 'sqfs' ] || [ "${plex_archive_type}" == 'both' ]; } && rm "${PLEX_TMP_DIR}/plexmediaserver.sqfs"
-	{ [ "${plex_archive_type}" == 'txz' ] || [ "${plex_archive_type}" == 'both' ]; } &&  rm "${PLEX_TMP_DIR}/${PLEX_VERSION}"
+	{ [ "${plex_archive_type}" == 'txz' ] || [ "${plex_archive_type}" == 'both' ]; } &&  rm -r "${PLEX_TMP_DIR}/${PLEX_VERSION}"
 	start
 	
 }
