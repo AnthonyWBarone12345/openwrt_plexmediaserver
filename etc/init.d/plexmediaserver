@@ -92,18 +92,19 @@ load_uci() {
 
 	cat /proc/mounts | grep -q "${PLEX_BROWSER_ROOT}" || { mount "${PLEX_BROWSER_ROOT}" && sleep 5; }
 
-	if { [ -z "${PLEX_LIBRARY_DIR}" ] || ! [ -d "${PLEX_LIBRARY_DIR}" ]; }; then
+	if ! { [ -n "${PLEX_LIBRARY_DIR}" ] && [ -d "${PLEX_LIBRARY_DIR}" ]; }; then
 		if [ -d "${PLEX_BROWSER_ROOT}/.plex/Library" ]; then
 			PLEX_LIBRARY_DIR="${PLEX_BROWSER_ROOT}/.plex/Library"
 		else
 			PLEX_LIBRARY_DIR="$(find "${PLEX_BROWSER_ROOT}" -type d -maxdepth 3 -path '*/.plex/Library' | head -n 1)"
 		fi
-		[ -n "${PLEX_LIBRARY_DIR}" ] && /sbin/uci set plexmediaserver.@main[0].plex_library_dir="${PLEX_LIBRARY_DIR}" 
-		mkdir -p "${PLEX_LIBRARY_DIR}/Application" 
-		mkdir -p "${PLEX_LIBRARY_DIR}/Application Support" 
 	fi
+	[ -n "${PLEX_LIBRARY_DIR}" ] && /sbin/uci set plexmediaserver.@main[0].plex_library_dir="${PLEX_LIBRARY_DIR}" 
+	mkdir -p "${PLEX_LIBRARY_DIR}/Application" 
+	mkdir -p "${PLEX_LIBRARY_DIR}/Application Support" 
 
-	{ [ -z "${PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR}" ] || ! [ -d "${PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR}" ]; } && [ -d "${PLEX_LIBRARY_DIR}/Application Support" ] && PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR="${PLEX_LIBRARY_DIR}/Application Support"  && /sbin/uci set plexmediaserver.@main[0].plex_application_support_dir="${PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR}"
+	#{ [ -n "${PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR}" ] && [ -d "${PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR}" ]; } || [ -d "${PLEX_LIBRARY_DIR}/Application Support" ] && PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR="${PLEX_LIBRARY_DIR}/Application Support"  && /sbin/uci set plexmediaserver.@main[0].plex_application_support_dir="${PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR}"
+	[ -d "${PLEX_LIBRARY_DIR}/Application Support" ] && PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR="${PLEX_LIBRARY_DIR}/Application Support"  && /sbin/uci set plexmediaserver.@main[0].plex_application_support_dir="${PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR}"
 
         { [ -z "${PLEX_COMPRESSED_ARCHIVE_PATH}" ] || ! [ -f "${PLEX_COMPRESSED_ARCHIVE_PATH}" ]; } && { { [ -f "${PLEX_LIBRARY_DIR}/Application/plexmediaserver.sqfs" ] && PLEX_COMPRESSED_ARCHIVE_PATH="${PLEX_LIBRARY_DIR}/Application/plexmediaserver.sqfs"; } || { [ -f "${PLEX_LIBRARY_DIR}/Application/plexmediaserver.txz" ] && PLEX_COMPRESSED_ARCHIVE_PATH="${PLEX_LIBRARY_DIR}/Application/plexmediaserver.txz"; }; } && /sbin/uci set plexmediaserver.@main[0].plex_compressed_archive_path="${PLEX_COMPRESSED_ARCHIVE_PATH}"
 
@@ -275,6 +276,7 @@ update() {
 #
 # NOTE: To force the update to run, [re]move the archive at "${PLEX_COMPRESSED_ARCHIVE_PATH}". If there is not a file at "${PLEX_COMPRESSED_ARCHIVE_PATH}" then the update will run, even if `update_check` says there isnt an update available.
 
+	setup_uci
 	update_check
 	[ ${plex_update_available} == 0 ] && [ -f "${PLEX_COMPRESSED_ARCHIVE_PATH}" ] && echo -e "Update will not run, since Plex Media Server is up to date. To force running the update, [re]move the file at ${PLEX_COMPRESSED_ARCHIVE_PATH}" >&2 && return
 
@@ -302,22 +304,33 @@ update() {
 	# get url for most recent netgear plex download from netgear "verify_binary" url and download plex from it
 	cd "${plex_tmp}/${kk}"
 	
-	wget -r "${netgear_url}"
+	if find "${PLEX_TMP_DIR}/extra_libs/" | grep -q 'gconv'; then
 	
-	find "${plex_tmp}/${kk}" -type f -name 'verify_binary*.txt' | while read -r vb; do
+		cp -a "${PLEX_TMP_DIR}/extra_libs/" "${plex_tmp}"
+
+	elif find "$(dirname "${PLEX_COMPRESSED_ARCHIVE_PATH}")/extra_libs/" | grep -q 'gconv'; then
+
+		cp -a "$(dirname "${PLEX_COMPRESSED_ARCHIVE_PATH}")/extra_libs/" "${plex_tmp}"
+		
+	else
+		wget -r "${netgear_url}"
+		
+		find "${plex_tmp}/${kk}" -type f -name 'verify_binary*.txt' | while read -r vb; do
 		wget "$(cat "${vb}" | grep -F 'url="' | sed -E s/'^.* url\="(.*)".*$'/'\1'/)"
-	done
+		done
 	
-	# extract netgear plex package, strip away the extra_libs dir, discard everything else
-	
-	gzip -dc "${plex_tmp}/${kk}"/*.tgz | tar -x
-	
-	mv "${plex_tmp}/${kk}"/*/extra_libs "${plex_tmp}"
-	
-	cd "${plex_tmp}"
-	
-	rm -rf "${plex_tmp}/${kk}"
-	
+		
+		# extract netgear plex package, strip away the extra_libs dir, discard everything else
+		
+		gzip -dc "${plex_tmp}/${kk}"/*.tgz | tar -x
+		
+		mv "${plex_tmp}/${kk}"/*/extra_libs "${plex_tmp}"
+		
+		cd "${plex_tmp}"
+		
+		rm -rf "${plex_tmp}/${kk}"
+	fi
+
 	mkdir -p "${plex_tmp}/${kk}"
 	cd "${plex_tmp}/${kk}"
 	
@@ -367,6 +380,7 @@ update() {
 	stop
 	{ [ "${plex_archive_type}" == 'sqfs' ] || [ "${plex_archive_type}" == 'both' ]; } && rm "${PLEX_TMP_DIR}/plexmediaserver.sqfs"
 	{ [ "${plex_archive_type}" == 'txz' ] || [ "${plex_archive_type}" == 'both' ]; } &&  rm -r "${PLEX_TMP_DIR}/${PLEX_VERSION}"
+	sleep 5
 	start
 	
 }
