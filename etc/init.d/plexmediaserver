@@ -377,7 +377,7 @@ update() {
 
 
 	{ [ "${plex_archive_type}" == 'txz' ] || [ "${plex_archive_type}" == 'both' ]; } && tar -cvOf - "${plex_ver}" | xz -6e -zc > "${plex_tmp}/plexmediaserver.txz"
-	{ [ "${plex_archive_type}" == 'sqfs' ] || [ "${plex_archive_type}" == 'both' ]; } && ln -sf "${plex_ver}/extra_libs" "extra_libs" && mksquashfs "${plex_ver}" "extra_libs" "plexmediaserver.sqfs" -all-root -keep-as-directory -b 1048576 -comp xz -Xdict-size 100%
+	{ [ "${plex_archive_type}" == 'sqfs' ] || [ "${plex_archive_type}" == 'both' ]; } && ln -sf "${plex_ver}/extra_libs" "extra_libs" && mksquashfs "${plex_ver}" "extra_libs" "plexmediaserver.sqfs" -all-root -keep-as-directory -b 1048576 -comp xz -Xdict-size 100% -Xbcj arm
 
 #	{ [ "${plex_archive_type}" == 'sqfs' ] || [ "${plex_archive_type}" == 'both' ]; } && ln -sf "${plex_ver}/extra_libs" "extra_libs" && mksquashfs "${plex_ver}" "extra_libs" "plexmediaserver.sqfs" -all-root -keep-as-directory -comp zstd -Xcompression-level 22
 #	{ [ "${plex_archive_type}" == 'sqfs' ] || [ "${plex_archive_type}" == 'both' ]; } && ln -sf "${plex_ver}/extra_libs" "extra_libs" && ln -sf "${PLEX_LIBRARY_DIR}" "${plex_ver}/Library" && mksquashfs "${plex_ver}" "extra_libs" "plexmediaserver.sqfs" -all-root -keep-as-directory -comp zstd -Xcompression-level 22
