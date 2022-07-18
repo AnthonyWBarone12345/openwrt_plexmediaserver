@@ -124,12 +124,14 @@ unpack_plex() {
 	setup_uci
 	
 	# decompress Plex Binaries and Libs from plexmediaserver.txz
-	{ [ -z "${PLEX_BIN_DIR}" ] || [ -z "${PLEX_VERSION}" ] || [ \! -f "${PLEX_BIN_DIR}/Plex Media Server" ]; } && echo "Preparing plexmediaserver for use - extracting plex binaries and library files" >&2 || return 0
-	if [[ "${PLEX_COMPRESSED_ARCHIVE_PATH}" == *.txz ]] || [[ "${PLEX_COMPRESSED_ARCHIVE_PATH}" == *.tar.xz ]]; then
+	[ -n "${PLEX_BIN_DIR}" ] && [ -n "${PLEX_VERSION}" ] && [ -f "${PLEX_BIN_DIR}/Plex Media Server" ] && return 0 || echo "Preparing plexmediaserver for use - extracting plex binaries and library files" >&2
+	if echo "${PLEX_COMPRESSED_ARCHIVE_PATH}"  | grep -q -E '\.t(ar\.)?xz'; then
 		xz -dc "${PLEX_COMPRESSED_ARCHIVE_PATH}" | tar -C "${PLEX_TMP_DIR}" -xf -
-	elif [[ "${PLEX_COMPRESSED_ARCHIVE_PATH}"  == *.sqfs ]]; then
-		cp "${PLEX_COMPRESSED_ARCHIVE_PATH}" "${PLEX_TMP_DIR}" 
-		mount -t squashfs -o ro,relatime "${PLEX_TMP_DIR}/$(basename "${PLEX_COMPRESSED_ARCHIVE_PATH}")" "${PLEX_TMP_DIR}"
+	elif echo "${PLEX_COMPRESSED_ARCHIVE_PATH}"  | grep -q '.sqfs'; then
+		cp -f "${PLEX_COMPRESSED_ARCHIVE_PATH}" "${PLEX_TMP_DIR}" 
+		sleep 1
+		sync
+		mount -t squashfs "${PLEX_TMP_DIR}/$(basename "${PLEX_COMPRESSED_ARCHIVE_PATH}")" "${PLEX_TMP_DIR}"
 		for nn in  "${PLEX_TMP_DIR}"/*/tmp; do
 			mount -t tmpfs tmpfs "${nn}"
 		done
@@ -140,7 +142,7 @@ unpack_plex() {
 	[ -n "$(/sbin/uci get plexmediaserver.@main[0].plex_force_version)" ] && [ -d "${PLEX_TMP_DIR}/$(/sbin/uci get plexmediaserver.@main[0].plex_force_version)" ] && PLEX_VERSION="$(/sbin/uci get plexmediaserver.@main[0].plex_force_version)" && /sbin/uci set plexmediaserver.@main[0].plex_version="${PLEX_VERSION}"
 	
 	PLEX_BIN_DIR="${PLEX_TMP_DIR}/${PLEX_VERSION}" && /sbin/uci set plexmediaserver.@main[0].plex_bin_dir="${PLEX_BIN_DIR}"
-	if [[ "${PLEX_COMPRESSED_ARCHIVE_PATH}" == *.txz ]]; then
+	if echo "${PLEX_COMPRESSED_ARCHIVE_PATH}"  | grep -q -E '\.t(ar\.)?xz'; then
 		mkdir -p "${PLEX_BIN_DIR}/tmp"
 		
 		# setup links: link Library and "extra_libs" directory into PLEX_BIN_DIR / PLEX_TMP_DIR
@@ -162,26 +164,38 @@ stop() {
 	plex_pid="$(cat "${PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR}/Plex Media Server/plexmediaserver.pid")"
 	
 	# kill process listed in  plexmediaserver.pid
-	if $(echo "${plex_pid}" | grep -q -E '^[0-9]+$'); then
-		kill -3 "${plex_pid}"
-		
-		echo "SIGQUIT sent to server. Waiting 3 seconds and terminating if not dead" >&2
+	if { $(echo "${plex_pid}" | grep -q -E '^[0-9]+$') && $(ps | grep -v grep | grep -q "${plex_pid}"); }; then
+		echo "Valid Plex Media Server PID found." 
+		kill -3 "${plex_pid}" && echo "SIGQUIT sent to server. Waiting 3 seconds and terminating if not dead" >&2
 		sleep 3
 
-		ps | grep -q "${plex_pid}" && kill -15 "${plex_pid}" && echo "SIGTERM sent to server. Waiting 3 seconds and force killing if not dead" >&2 && sleep 3
+		ps | grep -v grep | grep -q "${plex_pid}" && kill -15 "${plex_pid}" && echo "SIGTERM sent to server. Waiting 3 seconds and [force] killing any remaining remnants if not dead" >&2 && sleep 3
 
 		echo "" > "${PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR}/Plex Media Server/plexmediaserver.pid"
 	else
-		echo "plexmediaserver.pid file missing or invalid. Skipping straight to force killing all Plex Media Server processes" >&2
+		echo "plexmediaserver.pid file missing or invalid. Skipping straight to [force] killing all Plex Media Server processes and remnants" >&2
 	fi
 
-	if [ "$(ps | grep -E '((Plex Media Server)|(Plex DLNA Server)|(PMS RunServer)|(Plex Plug-in)|(Plex Script Hos)|(\/tmp\/plexmediaserver))' | grep -v grep | wc -l)" != "0" ]; then
-	# kill any remnants still running
-		echo "Force killing leftover plexmediaserver procs" >&2
-		ps | grep -E '((Plex Media Server)|(Plex DLNA Server)|(PMS RunServer)|(Plex Plug-in)|(Plex Script Hos)|(\/tmp\/plexmediaserver))' | grep -v grep | awk '{print $1}' | xargs kill -9
+
+	if ps | grep -v grep | grep -q -E '((Plex Media Server)|(Plex DLNA Server)|(PMS RunServer)|(Plex Plug-in)|(Plex Script Hos)|('"$(echo "${PLEX_TMP_DIR}" | sed  -E s/'\/'/'\\\/'/g)"'))'; then
+		# kill any remnants still running
+		
+		echo "killing leftover Plex Media Server processes and remnants" >&2
+		kill -3 $(ps | grep -v grep | grep -E '((Plex Media Server)|(Plex DLNA Server)|(PMS RunServer)|(Plex Plug-in)|(Plex Script Hos)|('"$(echo "${PLEX_TMP_DIR}" | sed  -E s/'\/'/'\\\/'/g)"'))' | awk '{print $1}') && echo "SIGQUIT sent to server remnants. Waiting 3 seconds and terminating remnants if not dead" >&2
+		sleep 3
+	
+		ps | grep -v grep | grep -q -E '((Plex Media Server)|(Plex DLNA Server)|(PMS RunServer)|(Plex Plug-in)|(Plex Script Hos)|('"$(echo "${PLEX_TMP_DIR}" | sed  -E s/'\/'/'\\\/'/g)"'))' && kill -15 $(ps | grep -v grep | grep -E '((Plex Media Server)|(Plex DLNA Server)|(PMS RunServer)|(Plex Plug-in)|(Plex Script Hos)|('"$(echo "${PLEX_TMP_DIR}" | sed  -E s/'\/'/'\\\/'/g)"'))' | awk '{print $1}') && echo "SIGTERM sent to server remnants. Waiting 3 seconds and terminating remnants if not dead" >&2 && sleep 3
+	
+		ps | grep -v grep | grep -q -E '((Plex Media Server)|(Plex DLNA Server)|(PMS RunServer)|(Plex Plug-in)|(Plex Script Hos)|('"$(echo "${PLEX_TMP_DIR}" | sed  -E s/'\/'/'\\\/'/g)"'))' && kill -9 $(ps | grep -v grep | grep -E '((Plex Media Server)|(Plex DLNA Server)|(PMS RunServer)|(Plex Plug-in)|(Plex Script Hos)|('"$(echo "${PLEX_TMP_DIR}" | sed  -E s/'\/'/'\\\/'/g)"'))' | awk '{print $1}') && echo "SIGKILL sent to server remnants. Waiting 3 seconds and terminating remnants if not dead" >&2 && sleep 3
+
+		ps | grep -v grep | grep -q -E '((Plex Media Server)|(Plex DLNA Server)|(PMS RunServer)|(Plex Plug-in)|(Plex Script Hos)|('"$(echo "${PLEX_TMP_DIR}" | sed  -E s/'\/'/'\\\/'/g)"'))' && echo "Server remnants still detected even after sending SIGKILL sent to server remnants! You will need to manually find and kill any remnant Plex Media Server processes to fully shut it down." >&2 && return 1
+		
+		# ps | grep -E '((Plex Media Server)|(Plex DLNA Server)|(PMS RunServer)|(Plex Plug-in)|(Plex Script Hos)|(\/tmp\/plexmediaserver))' | grep -v grep | awk '{print $1}' | xargs kill -9
+
 	else
 		echo "Plex Media Server shutdown cleanly" >&2
 	fi
+
 	cat /proc/mounts | grep plexmediaserver | grep -q squashfs && umount "${PLEX_BIN_DIR}/tmp" "${PLEX_TMP_DIR}"
 }
 
@@ -363,11 +377,14 @@ update() {
 
 
 	{ [ "${plex_archive_type}" == 'txz' ] || [ "${plex_archive_type}" == 'both' ]; } && tar -cvOf - "${plex_ver}" | xz -6e -zc > "${plex_tmp}/plexmediaserver.txz"
-	{ [ "${plex_archive_type}" == 'sqfs' ] || [ "${plex_archive_type}" == 'both' ]; } && ln -sf "${plex_ver}/extra_libs" "extra_libs" && mksquashfs "${plex_ver}" "extra_libs" "plexmediaserver.sqfs" -all-root -keep-as-directory -comp zstd -Xcompression-level 22
+	{ [ "${plex_archive_type}" == 'sqfs' ] || [ "${plex_archive_type}" == 'both' ]; } && ln -sf "${plex_ver}/extra_libs" "extra_libs" && mksquashfs "${plex_ver}" "extra_libs" "plexmediaserver.sqfs" -all-root -keep-as-directory -b 1048576 -comp xz -Xdict-size 100%
+
+#	{ [ "${plex_archive_type}" == 'sqfs' ] || [ "${plex_archive_type}" == 'both' ]; } && ln -sf "${plex_ver}/extra_libs" "extra_libs" && mksquashfs "${plex_ver}" "extra_libs" "plexmediaserver.sqfs" -all-root -keep-as-directory -comp zstd -Xcompression-level 22
 #	{ [ "${plex_archive_type}" == 'sqfs' ] || [ "${plex_archive_type}" == 'both' ]; } && ln -sf "${plex_ver}/extra_libs" "extra_libs" && ln -sf "${PLEX_LIBRARY_DIR}" "${plex_ver}/Library" && mksquashfs "${plex_ver}" "extra_libs" "plexmediaserver.sqfs" -all-root -keep-as-directory -comp zstd -Xcompression-level 22
 	
 	mkdir -p "${plex_tmp}/old"
-	mv -f "${plex_tmp}/plexmediaserver."* "${plex_tmp}/old"
+	{ [ "${plex_archive_type}" == 'txz' ] || [ "${plex_archive_type}" == 'both' ]; } && [ -f "${plex_tmp}/plexmediaserver.txz" ] && mv -f "${plex_tmp}/plexmediaserver.txz" "${plex_tmp}/old"
+	{ [ "${plex_archive_type}" == 'sqfs' ] || [ "${plex_archive_type}" == 'both' ]; } && [ -f "${plex_tmp}/plexmediaserver.sqfs" ] && mv -f "${plex_tmp}/plexmediaserver.sqfs" "${plex_tmp}/old"
 	
 	mv "${plex_tmp}/${kk}/plexmediaserver.sqfs" "${plex_tmp}"
 		
